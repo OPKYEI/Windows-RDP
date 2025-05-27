@@ -1,5 +1,5 @@
 # RDE
-I forked this, and I am editing to trigger a build
+I forked this, and I am editing to trigger a build.
 # Reverse Windows RDP for GitHub Actions
 Enable RDP access on GitHub Actions VMs for general use.
 
