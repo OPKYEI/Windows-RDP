@@ -1,0 +1,97 @@
+name: Windows-RDP-Debug
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    
+    steps:
+    - name: Download and Setup ngrok
+      run: |
+        Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
+        Expand-Archive ngrok.zip -Force
+        .\ngrok\ngrok.exe --version
+        
+    - name: Enable RDP
+      run: |
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+        Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "${{ secrets.RDP_PASSWORD }}" -Force)
+        
+    - name: Check Network Status
+      run: |
+        netstat -ano | findstr "4040"
+        netstat -ano | findstr "3389"
+        Test-NetConnection -ComputerName localhost -Port 3389
+        
+    - name: Start ngrok (Debug Mode)
+      run: |
+        .\ngrok\ngrok.exe authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
+        Start-Process -FilePath ".\ngrok\ngrok.exe" -ArgumentList "tcp 3389 --log=stdout" -NoNewWindow
+        Start-Sleep -Seconds 10
+        Get-Process -Name ngrok
+        
+    - name: Verify ngrok is running
+      run: |
+        $ngrokProcess = Get-Process -Name ngrok -ErrorAction SilentlyContinue
+        if ($null -eq $ngrokProcess) {
+          Write-Host "❌ ngrok is not running!"
+          exit 1
+        } else {
+          Write-Host "✅ ngrok is running with PID: $($ngrokProcess.Id)"
+        }
+        
+    - name: Manual tunnel creation
+      run: |
+        Write-Host "Starting ngrok manually with full output"
+        Start-Process -FilePath ".\ngrok\ngrok.exe" -ArgumentList "tcp 3389" -NoNewWindow
+        Start-Sleep -Seconds 5
+        curl http://localhost:4040/api/tunnels
+        
+    - name: Get connection details
+      run: |
+        $maxRetries = 5
+        $retryCount = 0
+        $tunnelUrl = $null
+        
+        while ($retryCount -lt $maxRetries) {
+          try {
+            $response = Invoke-RestMethod -Uri http://localhost:4040/api/tunnels -ErrorAction Stop
+            if ($response.tunnels.length -gt 0) {
+              $tunnelUrl = $response.tunnels[0].public_url
+              break
+            }
+          } catch {
+            Write-Host "Attempt $($retryCount+1): Failed to get tunnel info: $_"
+          }
+          
+          $retryCount++
+          Start-Sleep -Seconds 5
+        }
+        
+        if ($tunnelUrl) {
+          Write-Host "=================================================="
+          Write-Host "✅ NGROK TUNNEL CREATED: $tunnelUrl" 
+          Write-Host "✅ COMPUTER: $($tunnelUrl.Replace('tcp://', ''))"
+          Write-Host "✅ USERNAME: runneradmin"
+          Write-Host "✅ PASSWORD: (Your RDP_PASSWORD secret)"
+          Write-Host "=================================================="
+        } else {
+          Write-Host "❌ Failed to create tunnel after $maxRetries attempts"
+          Write-Host "❌ Check ngrok dashboard at https://dashboard.ngrok.com/tunnels"
+        }
+        
+    - name: Keep session alive
+      run: |
+        Write-Host "Session will remain active for 6 hours."
+        $i = 0
+        while ($i -lt 72) {  # 72 * 5 minutes = 6 hours
+          $i++
+          $remainingTime = (72 - $i) * 5
+          Write-Host "[$(Get-Date)] Session active. Remaining time: $remainingTime minutes"
+          Start-Sleep -Seconds 300
+        }
