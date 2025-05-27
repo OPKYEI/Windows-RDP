@@ -1,4 +1,4 @@
-name: Windows-RDP
+name: Windows-RDP-Updated
 
 on:
   workflow_dispatch:
@@ -9,11 +9,12 @@ jobs:
     timeout-minutes: 360
     
     steps:
-    - name: Download and Install ngrok
+    - name: Download and Install Latest ngrok
       run: |
         Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
-        Expand-Archive ngrok.zip
-        Copy-Item ngrok\ngrok.exe C:\Windows\System32
+        Expand-Archive ngrok.zip -Force
+        Get-ChildItem -Path .\ngrok
+        .\ngrok\ngrok.exe --version
       
     - name: Enable RDP Access
       run: |
@@ -24,11 +25,22 @@ jobs:
       
     - name: Create ngrok Tunnel
       run: |
-        ngrok authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
-        ngrok tcp 3389 --log=stdout > ngrok.log &
+        .\ngrok\ngrok.exe authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
+        Start-Process -FilePath ".\ngrok\ngrok.exe" -ArgumentList "tcp 3389 --log=stdout" -RedirectStandardOutput "ngrok.log" -NoNewWindow
         Start-Sleep -Seconds 10
         Get-Content ngrok.log
-      
-    - name: Connect to RDP (Keep Alive)
+        
+    - name: Display ngrok Tunnel Info
       run: |
-        ping -n 360 127.0.0.1 > nul
+        $apiOutput = Invoke-RestMethod -Uri http://localhost:4040/api/tunnels
+        $tunnelUrl = $apiOutput.tunnels.public_url
+        Write-Host "NGROK TUNNEL URL: $tunnelUrl"
+        Write-Host "Username: runneradmin"
+        Write-Host "Password: (The password you set in RDP_PASSWORD secret)"
+      
+    - name: Keep RDP Connection Alive
+      run: |
+        while ($true) {
+          Write-Host "Keeping session alive..."
+          Start-Sleep -Seconds 600
+        }
